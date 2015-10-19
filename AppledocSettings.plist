@@ -7,7 +7,7 @@
 	<key>--project-company</key>
 	<string>Cocoanetics</string>
 	<key>--project-version</key>
-	<string>1.5</string>
+	<string>1.6</string>
 	<key>--company-id</key>
 	<string>com.cocoanetics</string>
 	<key>--docset-atom-filename</key>
@@ -33,8 +33,9 @@
 	<key>--ignore</key>
 	<array>
 		<string>*.m</string>
-		<string>Core/Externals</string>
+		<string>Externals</string>
 		<string>Demo</string>
+		<string>Test</string>
 	</array>
 	<key>--index-desc</key>
 	<string>Readme.markdown</string>
@@ -42,6 +43,7 @@
 	<array>
 		<string>./Documentation/Setup Guide-template.markdown</string>
 		<string>./Documentation/Known Issues-template.markdown</string>
+		<string>./Documentation/Programming Guide-template.markdown</string>
 		<string>./Documentation/DTCoreText_Demo_App.png</string>
 		<string>./Documentation/DTCoreText_Linker_Flags.png</string>
 		<string>./Documentation/DTCoreText_Search_Paths.png</string>

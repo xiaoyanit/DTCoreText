@@ -32,13 +32,18 @@
 extern NSString * const NSBaseURLDocumentOption;
 extern NSString * const NSTextEncodingNameDocumentOption;
 extern NSString * const NSTextSizeMultiplierDocumentOption;
+
+#if __IPHONE_OS_VERSION_MAX_ALLOWED < __IPHONE_7_0
 extern NSString * const NSAttachmentAttributeName; 
+#endif
+
 #endif
 
 // custom options
 
 extern NSString * const DTMaxImageSize;
 extern NSString * const DTDefaultFontFamily;
+extern NSString * const DTDefaultFontName;
 extern NSString * const DTDefaultFontSize;
 extern NSString * const DTDefaultTextColor;
 extern NSString * const DTDefaultLinkColor;
@@ -52,6 +57,10 @@ extern NSString * const DTDefaultHeadIndent;
 extern NSString * const DTDefaultStyleSheet;
 extern NSString * const DTUseiOS6Attributes;
 extern NSString * const DTWillFlushBlockCallBack;
+extern NSString * const DTProcessCustomHTMLAttributes;
+extern NSString * const DTIgnoreInlineStylesOption;
+extern NSString * const DTDocumentPreserveTrailingSpaces;
+
 
 // attributed string attribute constants
 
@@ -62,13 +71,17 @@ extern NSString * const DTLinkHighlightColorAttribute;
 extern NSString * const DTAnchorAttribute;
 extern NSString * const DTGUIDAttribute;
 extern NSString * const DTHeaderLevelAttribute;
-extern NSString * const DTPreserveNewlinesAttribute;
 extern NSString * const DTStrikeOutAttribute;
 extern NSString * const DTBackgroundColorAttribute;
 extern NSString * const DTShadowsAttribute;
 extern NSString * const DTHorizontalRuleStyleAttribute;
 extern NSString * const DTTextBlocksAttribute;
 extern NSString * const DTFieldAttribute;
+extern NSString * const DTCustomAttributesAttribute;
+extern NSString * const DTAscentMultiplierAttribute;
+extern NSString * const DTBackgroundStrokeColorAttribute;
+extern NSString * const DTBackgroundStrokeWidthAttribute;
+extern NSString * const DTBackgroundCornerRadiusAttribute;
 
 // field constants
 
@@ -77,32 +90,111 @@ extern NSString * const DTListPrefixField;
 // iOS 6 compatibility
 extern BOOL ___useiOS6Attributes;
 
+// exceptions
+extern NSString * const DTCoreTextFontDescriptorException;
+
 // macros
 
 #define IS_WHITESPACE(_c) (_c == ' ' || _c == '\t' || _c == 0xA || _c == 0xB || _c == 0xC || _c == 0xD || _c == 0x85)
 
 // types
 
-typedef enum
+/**
+ DTHTMLElement display style
+ */
+typedef NS_ENUM(NSUInteger, DTHTMLElementDisplayStyle)
 {
+	/**
+	 The element is inline text
+	 */
 	DTHTMLElementDisplayStyleInline = 0, // default
+	
+	/**
+	 The element is not displayed
+	 */
 	DTHTMLElementDisplayStyleNone,
+	
+	/**
+	 The element is a block
+	 */
 	DTHTMLElementDisplayStyleBlock,
+	
+	/**
+	 The element is an item in a list
+	 */
 	DTHTMLElementDisplayStyleListItem,
+	
+	/**
+	 The element is a table
+	 */
 	DTHTMLElementDisplayStyleTable,
-} DTHTMLElementDisplayStyle;
+};
 
-typedef enum
+/**
+ DTHTMLElement floating style
+ */
+typedef NS_ENUM(NSUInteger, DTHTMLElementFloatStyle)
 {
+	/**
+	 The element does not float
+	 */
 	DTHTMLElementFloatStyleNone = 0,
+	
+	
+	/**
+	 The element should float left-aligned
+	 */
 	DTHTMLElementFloatStyleLeft,
+	
+	
+	/**
+	 The element should float right-aligned
+	 */
 	DTHTMLElementFloatStyleRight
-} DTHTMLElementFloatStyle;
+};
 
-typedef enum
+/**
+ DTHTMLElement font variants
+ */
+typedef NS_ENUM(NSUInteger, DTHTMLElementFontVariant)
 {
+	/**
+	 The element inherts the font variant
+	 */
 	DTHTMLElementFontVariantInherit = 0,
+	
+	/**
+	 The element uses the normal font variant
+	 */
 	DTHTMLElementFontVariantNormal,
+	
+	/**
+	 The element should display in small caps
+	 */
 	DTHTMLElementFontVariantSmallCaps
-} DTHTMLElementFontVariant;
+};
+
+/**
+ The algorithm that DTCoreTextLayoutFrame uses for positioning lines
+ */
+typedef NS_ENUM(NSUInteger, DTCoreTextLayoutFrameLinePositioningOptions)
+{
+	/**
+	 The line positioning algorithm is similar to how Safari positions lines
+	 */
+	DTCoreTextLayoutFrameLinePositioningOptionAlgorithmWebKit = 1,
+	
+	/**
+	 The line positioning algorithm is how it was before the implementation of DTCoreTextLayoutFrameLinePositioningOptionAlgorithmWebKit
+	 */
+	DTCoreTextLayoutFrameLinePositioningOptionAlgorithmLegacy = 2
+};
+
+// layouting
+
+// the value to use if the width is unknown
+#define CGFLOAT_WIDTH_UNKNOWN 16777215.0f
+
+// the value to use if the height is unknown
+#define CGFLOAT_HEIGHT_UNKNOWN 16777215.0f
 

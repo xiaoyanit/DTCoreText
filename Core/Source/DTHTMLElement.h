@@ -11,10 +11,10 @@
 @class DTTextAttachment;
 @class DTCSSListStyle;
 
+#import "DTCompatibility.h"
 #import "DTCoreTextConstants.h"
 #import "DTHTMLParserNode.h"
 #import "DTTextAttachment.h"
-#import "DTCompatibility.h"
 
 @class DTBreakHTMLElement;
 
@@ -33,6 +33,10 @@
 	DTColor *_textColor;
 	DTColor *_backgroundColor;
 	
+	DTColor *_backgroundStrokeColor;
+	CGFloat _backgroundStrokeWidth;
+	CGFloat _backgroundCornerRadius;
+	
 	CTUnderlineStyle _underlineStyle;
 	
 	NSString *_beforeContent;
@@ -45,10 +49,6 @@
 	NSInteger _headerLevel;
 	
 	NSArray *_shadows;
-	
-	NSMutableDictionary *_fontCache;
-	
-	NSMutableDictionary *_additionalAttributes;
 	
 	DTHTMLElementDisplayStyle _displayStyle;
 	DTHTMLElementFloatStyle _floatStyle;
@@ -75,6 +75,8 @@
 	
 	// indent of lists
 	CGFloat _listIndent;
+	
+	BOOL _shouldProcessCustomHTMLAttributes;
 }
 
 /**
@@ -101,6 +103,11 @@
  */
 - (NSAttributedString *)attributedString;
 
+/**
+ The dictionary of Core Text attributes for creating an `NSAttributedString` representation for the receiver
+ @returns The dictionary of attributes
+ */
+- (NSDictionary *)attributesForAttributedStringRepresentation;
 
 /**
  Creates a <DTCSSListStyle> to match the CSS styles
@@ -146,6 +153,26 @@
  Background color of text in the receiver
  */
 @property (nonatomic, strong) DTColor *backgroundColor;
+
+/**
+ Background stroke color in the receiver
+ */
+@property (nonatomic, strong) DTColor *backgroundStrokeColor;
+
+/**
+ Background stroke width in the receiver
+ */
+@property (nonatomic, assign) CGFloat backgroundStrokeWidth;
+
+/**
+ Background stroke width in the receiver
+ */
+@property (nonatomic, assign) CGFloat backgroundCornerRadius;
+
+/**
+ The custom letter spacing of the receiver, default is 0px
+ */
+@property (nonatomic, assign) CGFloat letterSpacing;
 
 /**
  Additional text to be inserted before the text content of the receiver
@@ -204,6 +231,11 @@
 @property (nonatomic, assign) DTHTMLElementFontVariant fontVariant;
 
 /**
+ The current unscaled font size (used when inheriting font size). You're probably looking for fontDescriptor.pointSize.
+ */
+@property (nonatomic, assign) CGFloat currentTextSize;
+
+/**
  The scale by which all fonts are scaled
  */
 @property (nonatomic, assign) CGFloat textScale;
@@ -227,29 +259,14 @@
  */
 @property (nonatomic, assign) BOOL containsAppleConvertedSpace;
 
-
 /**
- Ignores children for output that consist only of whitespace
+ Prevents adding custom HTML attributes to output
  */
-@property (nonatomic, assign) BOOL supressWhitespaceChildren;
-
+@property (nonatomic, assign) BOOL shouldProcessCustomHTMLAttributes;
 
 /**
  @name Working with HTML Attributes
  */
-
-/**
- The dictionary of attributes of the receiver
- @returns The dictionary
- */
-- (NSDictionary *)attributesDictionary;
-
-/**
- Adds an additional attribute key/value pair to the attributes dictionary of the receiver
- @param attribute The attribute string to set
- @param key The key to set it for
- */
-- (void)addAdditionalAttribute:(id)attribute forKey:(id)key;
 
 /**
  Retrieves an attribute with a given key
@@ -269,6 +286,15 @@
  */
 - (void)interpretAttributes;
 
+/**
+ The HTML attributes that should be attached to the generated attributed string. Typically all attributes that were processed by -interpretAttributes are in this list. All other attributes get added to the generated attributed string with the DTCustomAttributesAttribute key.
+ */
++ (NSSet *)attributesToIgnoreForCustomAttributesAttribute;
+
+/**
+ The CSS class names that are not to be added to the "class" custom attribute in the DTCustomAttributesAttribute key. Those are usually the class names 
+ */
+@property(nonatomic, strong) NSSet *CSSClassNamesToIgnoreForCustomAttributes;
 
 /**
  @name Working with CSS Styles
@@ -279,11 +305,6 @@
  @param styles A style dictionary
  */
 - (void)applyStyleDictionary:(NSDictionary *)styles;
-
-/**
- The most recently applied styles dictionary
- */
-//- (NSDictionary *)styles;
 
 
 /**

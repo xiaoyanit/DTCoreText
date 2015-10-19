@@ -6,10 +6,15 @@
 //  Copyright 2011 Drobnik.com. All rights reserved.
 //
 
-#import "DTAttributedTextContentView.h"
-#import "DTCoreText.h"
-#import "DTDictationPlaceholderTextAttachment.h"
 #import <QuartzCore/QuartzCore.h>
+
+#import "DTCoreText.h"
+#import "DTAttributedTextContentView.h"
+#import "DTDictationPlaceholderTextAttachment.h"
+#import "DTAccessibilityViewProxy.h"
+#import "DTAccessibilityElement.h"
+#import "DTCoreTextLayoutFrameAccessibilityElementGenerator.h"
+#import "DTBlockFunctions.h"
 
 #if !__has_feature(objc_arc)
 #error THIS CODE MUST BE COMPILED WITH ARC ENABLED!
@@ -17,7 +22,7 @@
 
 NSString * const DTAttributedTextContentViewDidFinishLayoutNotification = @"DTAttributedTextContentViewDidFinishLayoutNotification";
 
-@interface DTAttributedTextContentView ()
+@interface DTAttributedTextContentView () <DTAccessibilityViewProxyDelegate>
 {
 	BOOL _shouldAddFirstLineLeading;
 	BOOL _shouldDrawImages;
@@ -42,16 +47,19 @@ NSString * const DTAttributedTextContentViewDidFinishLayoutNotification = @"DTAt
 		unsigned int delegateSupportsCustomViewsForAttachments:1;
 		unsigned int delegateSupportsCustomViewsForLinks:1;
 		unsigned int delegateSupportsGenericCustomViews:1;
+		unsigned int delegateSupportsNotificationBeforeDrawing:1;
 		unsigned int delegateSupportsNotificationAfterDrawing:1;
 		unsigned int delegateSupportsNotificationBeforeTextBoxDrawing:1;
 	} _delegateFlags;
 	
-	__unsafe_unretained id <DTAttributedTextContentViewDelegate> _delegate;
+	DT_WEAK_VARIABLE id <DTAttributedTextContentViewDelegate> _delegate;
 }
 
 @property (nonatomic, strong) NSMutableDictionary *customViewsForLinksIndex;
 @property (nonatomic, strong) NSMutableDictionary *customViewsForAttachmentsIndex;
 @property (nonatomic, strong) NSMutableSet *customViews;
+
+@property (nonatomic, strong) NSArray *accessibilityElements;
 
 - (void)removeAllCustomViews;
 - (void)removeAllCustomViewsForLinks;
@@ -76,6 +84,21 @@ static Class _layerClassToUseForDTAttributedTextContentView = nil;
 	}
 	
 	return [CALayer class];
+}
+
+@end
+
+
+@implementation DTAttributedTextContentView (Cursor)
+
+- (NSInteger)closestCursorIndexToPoint:(CGPoint)point
+{
+	return [self.layoutFrame closestCursorIndexToPoint:point];
+}
+
+- (CGRect)cursorRectAtIndex:(NSInteger)index
+{
+	return [self.layoutFrame cursorRectAtIndex:index];
 }
 
 @end
@@ -136,6 +159,7 @@ static Class _layerClassToUseForDTAttributedTextContentView = nil;
 
 - (void)awakeFromNib
 {
+	[super awakeFromNib];
 	[self setup];
 }
 
@@ -188,8 +212,6 @@ static Class _layerClassToUseForDTAttributedTextContentView = nil;
 	
 	for (DTCoreTextLayoutLine *oneLine in lines)
 	{
-		NSRange lineRange = [oneLine stringRange];
-		
 		NSUInteger skipRunsBeforeLocation = 0;
 		
 		for (DTCoreTextGlyphRun *oneRun in oneLine.glyphRuns)
@@ -202,23 +224,50 @@ static Class _layerClassToUseForDTAttributedTextContentView = nil;
 			{
 				// see if it's a link
 				NSRange effectiveRangeOfLink;
-				NSRange effectiveRangeOfAttachment;
 				
 				// make sure that a link is only as long as the area to the next attachment or the current attachment itself
-				DTTextAttachment *attachment = [layoutString attribute:NSAttachmentAttributeName atIndex:runRange.location longestEffectiveRange:&effectiveRangeOfAttachment inRange:lineRange];
+				DTTextAttachment *attachment = oneRun.attributes[NSAttachmentAttributeName];
 				
 				// if there is no attachment then the effectiveRangeOfAttachment contains the range until the next attachment
-				NSURL *linkURL = [layoutString attribute:DTLinkAttribute atIndex:runRange.location longestEffectiveRange:&effectiveRangeOfLink inRange:effectiveRangeOfAttachment];
+				NSURL *linkURL = oneRun.attributes[DTLinkAttribute];
+				
+				if (linkURL)
+				{
+					effectiveRangeOfLink = runRange;
+				}
 				
 				// avoid chaining together glyph runs for an attachment
 				if (linkURL && !attachment)
 				{
-					// compute bounding frame over potentially multiple (chinese) glyphs
-					skipRunsBeforeLocation = effectiveRangeOfLink.location+effectiveRangeOfLink.length;
+					NSInteger glyphIndex = [oneLine.glyphRuns indexOfObject:oneRun];
 					
-					// make one link view for all glyphruns in this line
+					// chain together this glyph run with following runs for combined link buttons
+					for (NSInteger i=glyphIndex+1; i<[oneLine.glyphRuns count]; i++)
+					{
+						DTCoreTextGlyphRun *followingRun = oneLine.glyphRuns[i];
+						NSURL *followingURL = followingRun.attributes[DTLinkAttribute];
+						
+						if (![[followingURL absoluteString] isEqualToString:[linkURL absoluteString]])
+						{
+							// following glyph run has different or no link URL
+							break;
+						}
+						
+						if (followingRun.attachment)
+						{
+							// do not join a following attachment to the combined link
+							break;
+						}
+						
+						// extend effective link range
+						effectiveRangeOfLink = NSUnionRange(effectiveRangeOfLink, followingRun.stringRange);
+					}
+					
+					// frame for link view includes for all joined glyphruns with same link in this line
 					frameForSubview = [oneLine frameOfGlyphsWithRange:effectiveRangeOfLink];
-					runRange = effectiveRangeOfLink;
+					
+					// this following glyph run link attribute is joined to link range
+					skipRunsBeforeLocation = NSMaxRange(effectiveRangeOfLink);
 				}
 				else
 				{
@@ -239,7 +288,7 @@ static Class _layerClassToUseForDTAttributedTextContentView = nil;
 				}
 				
 				// if there is an attachment then we continue even with empty frame, might be a lazily loaded image
-				if (CGRectIsEmpty(frameForSubview) && !attachment)
+				if ((frameForSubview.size.width<=0 || frameForSubview.size.height<=0) && !attachment)
 				{
 					continue;
 				}
@@ -254,10 +303,10 @@ static Class _layerClassToUseForDTAttributedTextContentView = nil;
 				}
 				
 				// round frame
-				frameForSubview.origin.x = floorf(frameForSubview.origin.x);
-				frameForSubview.origin.y = ceilf(frameForSubview.origin.y);
-				frameForSubview.size.width = roundf(frameForSubview.size.width);
-				frameForSubview.size.height = roundf(frameForSubview.size.height);
+				frameForSubview.origin.x = floor(frameForSubview.origin.x);
+				frameForSubview.origin.y = ceil(frameForSubview.origin.y);
+				frameForSubview.size.width = round(frameForSubview.size.width);
+				frameForSubview.size.height = round(frameForSubview.size.height);
 				
 				if (CGRectGetMinY(frameForSubview)> CGRectGetMaxY(rect) || CGRectGetMaxY(frameForSubview) < CGRectGetMinY(rect))
 				{
@@ -272,7 +321,6 @@ static Class _layerClassToUseForDTAttributedTextContentView = nil;
 					
 					if (existingAttachmentView)
 					{
-						//dispatch_sync(dispatch_get_main_queue(), ^{
 						existingAttachmentView.hidden = NO;
 						existingAttachmentView.frame = frameForSubview;
 						
@@ -280,7 +328,6 @@ static Class _layerClassToUseForDTAttributedTextContentView = nil;
 						
 						[existingAttachmentView setNeedsLayout];
 						[existingAttachmentView setNeedsDisplay];
-						//});
 						
 						linkURL = nil; // prevent adding link button on top of image view
 					}
@@ -327,8 +374,8 @@ static Class _layerClassToUseForDTAttributedTextContentView = nil;
 					// make sure that the frame height is no less than the line height for hyperlinks
 					if (frameForSubview.size.height < oneLine.frame.size.height)
 					{
-						frameForSubview.origin.y = truncf(oneLine.frame.origin.y);
-						frameForSubview.size.height = ceilf(oneLine.frame.size.height);
+						frameForSubview.origin.y = trunc(oneLine.frame.origin.y);
+						frameForSubview.size.height = ceil(oneLine.frame.size.height);
 					}
 					
 					if (existingLinkView)
@@ -343,8 +390,8 @@ static Class _layerClassToUseForDTAttributedTextContentView = nil;
 						// make sure that the frame height is no less than the line height for hyperlinks
 						if (frameForSubview.size.height < oneLine.frame.size.height)
 						{
-							frameForSubview.origin.y = truncf(oneLine.frame.origin.y);
-							frameForSubview.size.height = ceilf(oneLine.frame.size.height);
+							frameForSubview.origin.y = trunc(oneLine.frame.origin.y);
+							frameForSubview.size.height = ceil(oneLine.frame.size.height);
 						}
 						
 						if (_delegateFlags.delegateSupportsCustomViewsForLinks)
@@ -380,8 +427,6 @@ static Class _layerClassToUseForDTAttributedTextContentView = nil;
 
 - (void)layoutSubviews
 {
-	[super layoutSubviews];
-	
 	if (!_isTiling && (self.bounds.size.width>1024.0 || self.bounds.size.height>1024.0))
 	{
 		if (![self.layer isKindOfClass:[CATiledLayer class]])
@@ -394,6 +439,8 @@ static Class _layerClassToUseForDTAttributedTextContentView = nil;
 	{
 		[self layoutSubviewsInRect:CGRectInfinite];
 	}
+  
+    [super layoutSubviews];
 }
 
 - (void)drawLayer:(CALayer *)layer inContext:(CGContextRef)ctx
@@ -401,7 +448,7 @@ static Class _layerClassToUseForDTAttributedTextContentView = nil;
 	// needs clearing of background
 	CGRect rect = CGContextGetClipBoundingBox(ctx);
 	
-	if (_backgroundOffset.height || _backgroundOffset.width)
+	if (_backgroundOffset.height != 0 || _backgroundOffset.width != 0)
 	{
 		CGContextSetPatternPhase(ctx, _backgroundOffset);
 	}
@@ -431,6 +478,11 @@ static Class _layerClassToUseForDTAttributedTextContentView = nil;
 		options |= DTCoreTextLayoutFrameDrawingOmitLinks;
 	}
 	
+	if (_delegateFlags.delegateSupportsNotificationBeforeDrawing)
+	{
+		[_delegate attributedTextContentView:self willDrawLayoutFrame:theLayoutFrame inContext:ctx];
+	}
+	
 	// need to prevent updating of string and drawing at the same time
 	[theLayoutFrame drawInContext:ctx options:options];
 	
@@ -448,35 +500,37 @@ static Class _layerClassToUseForDTAttributedTextContentView = nil;
 
 - (void)relayoutText
 {
-	if (![NSThread isMainThread])
-	{
-		[self performSelectorOnMainThread:@selector(relayoutText) withObject:nil waitUntilDone:YES];
-		return;
-	}
-	
-    // Make sure we actually have a superview and a previous layout before attempting to relayout the text.
-    if (_layoutFrame && self.superview)
-	{
-        // need new layout frame, layouter can remain because the attributed string is probably the same
-        self.layoutFrame = nil;
-        
-        // remove all links because they might have merged or split
-        [self removeAllCustomViewsForLinks];
-        
-        if (_attributedString)
-        {
-            // triggers new layout
-            CGSize neededSize = [self intrinsicContentSize];
-            
-			CGRect optimalFrame = CGRectMake(self.frame.origin.x, self.frame.origin.y, neededSize.width, neededSize.height);
-			NSDictionary *userInfo = [NSDictionary dictionaryWithObject:[NSValue valueWithCGRect:optimalFrame] forKey:@"OptimalFrame"];
+	DTBlockPerformSyncIfOnMainThreadElseAsync(^{
+
+		// Make sure we actually have a superview and a previous layout before attempting to relayout the text.
+		if (_layoutFrame && self.superview)
+		{
+			// need new layout frame, layouter can remain because the attributed string is probably the same
+			self.layoutFrame = nil;
 			
-			[[NSNotificationCenter defaultCenter] postNotificationName:DTAttributedTextContentViewDidFinishLayoutNotification object:self userInfo:userInfo];
-        }
-		
-		[self setNeedsLayout];
-		[self setNeedsDisplayInRect:self.bounds];
-    }
+			// remove all links because they might have merged or split
+			[self removeAllCustomViewsForLinks];
+			
+			if (_attributedString)
+			{
+				// triggers new layout
+				CGSize neededSize = [self intrinsicContentSize];
+				
+				CGRect optimalFrame = CGRectMake(self.frame.origin.x, self.frame.origin.y, neededSize.width, neededSize.height);
+				NSDictionary *userInfo = [NSDictionary dictionaryWithObject:[NSValue valueWithCGRect:optimalFrame] forKey:@"OptimalFrame"];
+				
+				[[NSNotificationCenter defaultCenter] postNotificationName:DTAttributedTextContentViewDidFinishLayoutNotification object:self userInfo:userInfo];
+			}
+			
+			[self setNeedsLayout];
+			[self setNeedsDisplayInRect:self.bounds];
+			
+			if ([self respondsToSelector:@selector(invalidateIntrinsicContentSize)])
+			{
+            [self invalidateIntrinsicContentSize];
+			}
+		}
+	});
 }
 
 - (void)removeAllCustomViewsForLinks
@@ -525,6 +579,15 @@ static Class _layerClassToUseForDTAttributedTextContentView = nil;
 
 #pragma mark - Sizing
 
+- (void)setBounds:(CGRect)bounds {
+
+    if (!CGSizeEqualToSize(self.bounds.size, bounds.size)) {
+        _layoutFrame = nil;
+        [self invalidateIntrinsicContentSize];
+    }
+    [super setBounds:bounds];
+}
+
 - (CGSize)intrinsicContentSize
 {
 	if (!self.layoutFrame) // creates new layout frame if possible
@@ -545,7 +608,8 @@ static Class _layerClassToUseForDTAttributedTextContentView = nil;
 		return neededSize;
 	}
 	
-	return size;
+	// return empty size plus padding
+	return CGSizeMake(_edgeInsets.left + _edgeInsets.right, _edgeInsets.bottom + _edgeInsets.top);
 }
 
 - (CGRect)_frameForLayoutFrameConstraintedToWidth:(CGFloat)constrainWidth
@@ -577,7 +641,7 @@ static Class _layerClassToUseForDTAttributedTextContentView = nil;
 	}
 	else
 	{
-		rect.size.height = CGFLOAT_OPEN_HEIGHT; // necessary height set as soon as we know it.
+		rect.size.height = CGFLOAT_HEIGHT_UNKNOWN; // necessary height set as soon as we know it.
 	}
 	
 	return rect;
@@ -593,7 +657,6 @@ static Class _layerClassToUseForDTAttributedTextContentView = nil;
 	tmpLayoutFrame.numberOfLines = _numberOfLines;
 	tmpLayoutFrame.lineBreakMode = _lineBreakMode;
 	tmpLayoutFrame.truncationString = _truncationString;
-	tmpLayoutFrame.noLeadingOnFirstLine = !_shouldAddFirstLineLeading;
 	
 	//  we have a layout frame and from this we get the needed size
 	return CGSizeMake(tmpLayoutFrame.frame.size.width + _edgeInsets.left + _edgeInsets.right, CGRectGetMaxY(tmpLayoutFrame.frame) + _edgeInsets.bottom);
@@ -607,6 +670,11 @@ static Class _layerClassToUseForDTAttributedTextContentView = nil;
 		_edgeInsets = edgeInsets;
 		
 		[self relayoutText];
+		
+		if ([self respondsToSelector:@selector(invalidateIntrinsicContentSize)])
+		{
+			[self invalidateIntrinsicContentSize];
+		}
 	}
 }
 
@@ -633,6 +701,11 @@ static Class _layerClassToUseForDTAttributedTextContentView = nil;
 			// this is needed or else no lazy layout will be triggered if there is no layout frame yet (before this is added to a superview)
 			[self setNeedsLayout];
 			[self setNeedsDisplayInRect:self.bounds];
+		}
+		
+		if ([self respondsToSelector:@selector(invalidateIntrinsicContentSize)])
+		{
+			[self invalidateIntrinsicContentSize];
 		}
 	}
 }
@@ -689,6 +762,11 @@ static Class _layerClassToUseForDTAttributedTextContentView = nil;
 		_shouldAddFirstLineLeading = shouldAddLeading;
 		
 		[self setNeedsDisplay];
+		
+		if ([self respondsToSelector:@selector(invalidateIntrinsicContentSize)])
+		{
+			[self invalidateIntrinsicContentSize];
+		}
 	}
 }
 
@@ -699,6 +777,11 @@ static Class _layerClassToUseForDTAttributedTextContentView = nil;
 		_shouldDrawImages = shouldDrawImages;
 		
 		[self setNeedsDisplay];
+		
+		if ([self respondsToSelector:@selector(invalidateIntrinsicContentSize)])
+		{
+			[self invalidateIntrinsicContentSize];
+		}
 	}
 }
 
@@ -709,6 +792,11 @@ static Class _layerClassToUseForDTAttributedTextContentView = nil;
 		_shouldDrawLinks = shouldDrawLinks;
 		
 		[self setNeedsDisplay];
+		
+		if ([self respondsToSelector:@selector(invalidateIntrinsicContentSize)])
+		{
+			[self invalidateIntrinsicContentSize];
+		}
 	}
 }
 
@@ -788,11 +876,10 @@ static Class _layerClassToUseForDTAttributedTextContentView = nil;
 				}
 				else
 				{
-					rect.size.height = CGFLOAT_OPEN_HEIGHT; // necessary height set as soon as we know it.
+					rect.size.height = CGFLOAT_HEIGHT_UNKNOWN; // necessary height set as soon as we know it.
 				}
 				
 				_layoutFrame = [theLayouter layoutFrameWithRect:rect range:NSMakeRange(0, 0)];
-				_layoutFrame.noLeadingOnFirstLine = !_shouldAddFirstLineLeading;
 				_layoutFrame.numberOfLines = _numberOfLines;
 				_layoutFrame.lineBreakMode = _lineBreakMode;
 				_layoutFrame.truncationString = _truncationString;
@@ -807,10 +894,13 @@ static Class _layerClassToUseForDTAttributedTextContentView = nil;
 				
 				if (_delegateFlags.delegateSupportsNotificationBeforeTextBoxDrawing)
 				{
-					__unsafe_unretained DTAttributedTextContentView *weakself = self;
+					DT_WEAK_VARIABLE DTAttributedTextContentView *weakself = self;
 					
 					[_layoutFrame setTextBlockHandler:^(DTTextBlock *textBlock, CGRect frame, CGContextRef context, BOOL *shouldDrawDefaultBackground) {
-						BOOL result = [weakself->_delegate attributedTextContentView:weakself shouldDrawBackgroundForTextBlock:textBlock frame:frame context:context forLayoutFrame:weakself->_layoutFrame];
+						
+						DTAttributedTextContentView *strongself = weakself;
+						
+						BOOL result = [strongself->_delegate attributedTextContentView:strongself shouldDrawBackgroundForTextBlock:textBlock frame:frame context:context forLayoutFrame:strongself->_layoutFrame];
 						
 						if (shouldDrawDefaultBackground)
 						{
@@ -819,6 +909,8 @@ static Class _layerClassToUseForDTAttributedTextContentView = nil;
 						
 					}];
 				}
+
+				[self invalidateAccessibilityElements];
 			}
 		}
 	
@@ -840,6 +932,8 @@ static Class _layerClassToUseForDTAttributedTextContentView = nil;
 				[self setNeedsDisplayInRect:self.bounds];
 			}
 			_layoutFrame = layoutFrame;
+			
+			[self invalidateAccessibilityElements];
 		}
 	};
 }
@@ -881,6 +975,7 @@ static Class _layerClassToUseForDTAttributedTextContentView = nil;
 	_delegateFlags.delegateSupportsCustomViewsForAttachments = [_delegate respondsToSelector:@selector(attributedTextContentView:viewForAttachment:frame:)];
 	_delegateFlags.delegateSupportsCustomViewsForLinks = [_delegate respondsToSelector:@selector(attributedTextContentView:viewForLink:identifier:frame:)];
 	_delegateFlags.delegateSupportsGenericCustomViews = [_delegate respondsToSelector:@selector(attributedTextContentView:viewForAttributedString:frame:)];
+	_delegateFlags.delegateSupportsNotificationBeforeDrawing = [_delegate respondsToSelector:@selector(attributedTextContentView:willDrawLayoutFrame:inContext:)];
 	_delegateFlags.delegateSupportsNotificationAfterDrawing = [_delegate respondsToSelector:@selector(attributedTextContentView:didDrawLayoutFrame:inContext:)];
 	_delegateFlags.delegateSupportsNotificationBeforeTextBoxDrawing = [_delegate respondsToSelector:@selector(attributedTextContentView:shouldDrawBackgroundForTextBlock:frame:context:forLayoutFrame:)];
 	
@@ -901,12 +996,76 @@ static Class _layerClassToUseForDTAttributedTextContentView = nil;
 	}
 }
 
+#pragma mark - Accessibility
+
+- (void)invalidateAccessibilityElements
+{
+	_accessibilityElements = nil;
+}
+
+- (BOOL)isAccessibilityElement
+{
+	return NO;
+}
+
+- (NSInteger)accessibilityElementCount
+{
+	return [[self accessibilityElements] count];
+}
+
+- (id)accessibilityElementAtIndex:(NSInteger)index
+{
+	NSUInteger count = [self accessibilityElementCount];
+	
+	if (count > 0 && index < count)
+	{
+		return [[self accessibilityElements] objectAtIndex:index];
+	}
+	
+	return nil;
+}
+
+- (NSInteger)indexOfAccessibilityElement:(id)element
+{
+	// It seems like indexOfObject: is failing for the proxy views, even though isEqual: and hash are both implemented
+	// on the proxy.  Perhaps UIView doesn't like isEqual: with our proxy view.  Regardless, this implementation seems to work.
+	NSInteger index = [[self accessibilityElements] indexOfObjectPassingTest:^BOOL(id obj, NSUInteger idx, BOOL *stop) {
+		BOOL equal = [obj isEqual:element];
+		*stop = equal;
+		return equal;
+	}];
+
+	return index;
+}
+
+- (NSArray *)accessibilityElements
+{
+	if (!_accessibilityElements)
+	{
+		DTCoreTextLayoutFrameAccessibilityElementGenerator *generator = [[DTCoreTextLayoutFrameAccessibilityElementGenerator alloc] init];
+		_accessibilityElements = [generator accessibilityElementsForLayoutFrame:self.layoutFrame view:self attachmentViewProvider:^id(DTTextAttachment *attachment) {
+			// Since we actually take the views out of the view hierarchy when they're off screen, create a proxy object that stands
+			// in for the view until it's needed by VoiceOver.  By the time VoiceOver asks for the view, it should already be onscreen.
+			return [[DTAccessibilityViewProxy alloc] initWithTextAttachment:attachment delegate:self];
+		}];
+	}
+	return _accessibilityElements;
+}
+
+#pragma mark - DTAccessibilityViewProxyDelegate
+
+- (UIView *)viewForTextAttachment:(DTTextAttachment *)textAttachment proxy:(DTAccessibilityViewProxy *)proxy
+{
+	NSNumber *indexKey = [NSNumber numberWithInteger:[textAttachment hash]];
+	UIView *existingAttachmentView = [self.customViewsForAttachmentsIndex objectForKey:indexKey];
+	return existingAttachmentView;
+}
+
 @synthesize layouter = _layouter;
 @synthesize layoutFrame = _layoutFrame;
 @synthesize attributedString = _attributedString;
 @synthesize delegate = _delegate;
 @synthesize edgeInsets = _edgeInsets;
-@synthesize shouldAddFirstLineLeading = _shouldAddFirstLineLeading;
 @synthesize shouldDrawImages = _shouldDrawImages;
 @synthesize shouldDrawLinks = _shouldDrawLinks;
 @synthesize shouldLayoutCustomSubviews = _shouldLayoutCustomSubviews;
@@ -918,6 +1077,8 @@ static Class _layerClassToUseForDTAttributedTextContentView = nil;
 @synthesize customViewsForAttachmentsIndex;
 @synthesize relayoutMask = _relayoutMask;
 
+@synthesize accessibilityElements = _accessibilityElements;
+
 @end
 
 @implementation DTAttributedTextContentView (Drawing)
@@ -927,6 +1088,10 @@ static Class _layerClassToUseForDTAttributedTextContentView = nil;
 	UIGraphicsBeginImageContextWithOptions(bounds.size, NO, 0);
 	
 	CGContextRef context = UIGraphicsGetCurrentContext();
+	
+	if(!context) {
+		return nil;
+	}
 	
 	CGContextTranslateCTM(context, -bounds.origin.x, -bounds.origin.y);
 	

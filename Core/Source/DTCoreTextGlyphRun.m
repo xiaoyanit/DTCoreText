@@ -13,20 +13,12 @@
 #import "DTCoreTextParagraphStyle.h"
 #import "DTCoreTextFunctions.h"
 #import "NSDictionary+DTCoreText.h"
-
-@interface DTCoreTextGlyphRun ()
-
-@property (nonatomic, assign) CGRect frame;
-@property (nonatomic, assign) NSInteger numberOfGlyphs;
-@property (nonatomic, unsafe_unretained, readwrite) NSDictionary *attributes;
-
-@end
-
+#import "DTWeakSupport.h"
+#import "DTLog.h"
 
 @implementation DTCoreTextGlyphRun
 {
 	CTRunRef _run;
-	
 	CGRect _frame;
 	
 	CGFloat _offset; // x distance from line origin 
@@ -42,9 +34,9 @@
 	
 	const CGPoint *_glyphPositionPoints;
 	
-	__unsafe_unretained DTCoreTextLayoutLine *_line;	// retain cycle, since these objects are retained by the _line
-	__unsafe_unretained NSDictionary *_attributes;
-    NSArray *_stringIndices;
+	DT_WEAK_VARIABLE DTCoreTextLayoutLine *_line;	// retain cycle, since these objects are retained by the _line
+	DT_WEAK_VARIABLE NSDictionary *_attributes; // weak because it is owned by _run IVAR
+	NSArray *_stringIndices;
 	
 	DTTextAttachment *_attachment;
 	BOOL _hyperlink;
@@ -79,10 +71,15 @@
 	}
 }
 
+#ifndef COVERAGE 
+// exclude method from coverage testing
+
 - (NSString *)description
 {
-	return [NSString stringWithFormat:@"<%@ glyphs=%d %@>", [self class], [self numberOfGlyphs], NSStringFromCGRect(_frame)];
+	return [NSString stringWithFormat:@"<%@ glyphs=%ld %@>", [self class], (long)[self numberOfGlyphs], NSStringFromCGRect(_frame)];
 }
+
+#endif
 
 #pragma mark - Drawing
 
@@ -120,10 +117,16 @@
 {
 	// get the scaling factor of the current translation matrix
 	CGAffineTransform ctm = CGContextGetCTM(context);
-	CGFloat contentScale = ctm.a; // needed for  rounding operations
+	CGFloat contentScale = MAX(ctm.a, -ctm.d); // needed for  rounding operations
+	
+	if (contentScale<1 || contentScale>2)
+	{
+		contentScale = 2;
+	}
+	
 	CGFloat smallestPixelWidth = 1.0f/contentScale;
 	
-	DTColor *backgroundColor = [_attributes backgroundColor];
+	DTColor *backgroundColor = [self.attributes backgroundColor];
 	
 	// -------------- Line-Out, Underline, Background-Color
 	BOOL drawStrikeOut = [[_attributes objectForKey:DTStrikeOutAttribute] boolValue];
@@ -133,7 +136,13 @@
 	{
 		// calculate area covered by non-whitespace
 		CGRect lineFrame = _line.frame;
-		lineFrame.size.width -= _line.trailingWhitespaceWidth;
+		
+		// LTR line frames include trailing whitespace in width
+		// we need to subtract it so that we don't highlight/underline it
+		if (!_line.writingDirectionIsRightToLeft)
+		{
+			lineFrame.size.width -= _line.trailingWhitespaceWidth;
+		}
 		
 		// exclude trailing whitespace so that we don't underline too much
 		CGRect runStrokeBounds = CGRectIntersection(lineFrame, self.frame);
@@ -166,6 +175,8 @@
 		
 		if (drawStrikeOut || drawUnderline)
 		{
+			BOOL didDrawSomething = NO;
+			
 			CGContextSaveGState(context);
 			
 			CTFontRef usedFont = (__bridge CTFontRef)([_attributes objectForKey:(id)kCTFontAttributeName]);
@@ -174,7 +185,7 @@
 			
 			if (usedFont)
 			{
-				fontUnderlineThickness = CTFontGetUnderlineThickness(usedFont);
+				fontUnderlineThickness = CTFontGetUnderlineThickness(usedFont) * smallestPixelWidth;
 			}
 			else
 			{
@@ -206,22 +217,19 @@
 				
 				CGContextMoveToPoint(context, runStrokeBounds.origin.x, y);
 				CGContextAddLineToPoint(context, runStrokeBounds.origin.x + runStrokeBounds.size.width, y);
+				
+				didDrawSomething = YES;
 			}
 			
-			if (drawUnderline)
+			// only draw underlines if Core Text didn't draw them yet
+			if (drawUnderline && !DTCoreTextDrawsUnderlinesWithGlyphs())
 			{
 				CGFloat y;
 				
-				if (usedFont)
-				{
-					CGFloat underlinePosition = CTFontGetUnderlinePosition(usedFont);
-					
-					y = DTRoundWithContentScale(runStrokeBounds.origin.y + runStrokeBounds.size.height - _descent - underlinePosition - fontUnderlineThickness/2.0f, contentScale);
-				}
-				else
-				{
-					y = DTRoundWithContentScale((runStrokeBounds.origin.y + runStrokeBounds.size.height - self.descent + 1.0f), contentScale);
-				}
+				// use lowest underline position of all glyph runs in same line
+				CGFloat underlinePosition = [_line underlineOffset];
+				
+				y = DTRoundWithContentScale(_line.baselineOrigin.y + underlinePosition - fontUnderlineThickness/2.0f, contentScale);
 				
 				if ((int)(usedUnderlineThickness/smallestPixelWidth)%2) // odd line width
 				{
@@ -230,10 +238,14 @@
 				
 				CGContextMoveToPoint(context, runStrokeBounds.origin.x, y);
 				CGContextAddLineToPoint(context, runStrokeBounds.origin.x + runStrokeBounds.size.width, y);
+				
+				didDrawSomething = YES;
 			}
 			
-			
-			CGContextStrokePath(context);
+			if (didDrawSomething)
+			{
+				CGContextStrokePath(context);
+			}
 			
 			CGContextRestoreGState(context); // restore antialiasing
 		}
@@ -242,12 +254,11 @@
 
 - (CGPathRef)newPathWithGlyphs
 {
-	NSDictionary *attributes = self.attributes;
-	CTFontRef font = (__bridge CTFontRef)[attributes objectForKey:(id)kCTFontAttributeName];
+	CTFontRef font = (__bridge CTFontRef)[self.attributes objectForKey:(id)kCTFontAttributeName];
 
 	if (!font)
 	{
-		NSLog(@"CTFont missing on %@", self);
+		DTLogError(@"CTFont missing on %@", self);
 		return NULL;
 	}
 	
@@ -351,7 +362,7 @@
 	{
 		CFRange range = CTRunGetStringRange(_run);
 
-		_stringRange = NSMakeRange(range.location, range.length);
+		_stringRange = NSMakeRange(range.location + _line.stringLocationOffset, range.length);
 	}
 	
 	return _stringRange;
@@ -378,7 +389,18 @@
 		return _isTrailingWhitespace;
 	}
 	
-	if (self == [[_line glyphRuns] lastObject])
+	BOOL isTrailing;
+	
+	if (_line.writingDirectionIsRightToLeft)
+	{
+		isTrailing = (self == [[_line glyphRuns] objectAtIndex:0]);
+	}
+	else
+	{
+		isTrailing = (self == [[_line glyphRuns] lastObject]);
+	}
+	
+	if (isTrailing)
 	{
 		if (!_didCalculateMetrics)
 		{

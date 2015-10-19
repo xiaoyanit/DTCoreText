@@ -53,6 +53,25 @@
 	return self;
 }
 
+- (instancetype)initWithCoder:(NSCoder *)aDecoder {
+	self = [super init];
+	if (self) {
+		_inherit = [aDecoder decodeBoolForKey:@"inherit"];
+		_type = [aDecoder decodeIntegerForKey:@"type"];
+		_position = [aDecoder decodeIntegerForKey:@"position"];
+		_imageName = [aDecoder decodeObjectForKey:@"imageName"];
+		_startingItemNumber = [aDecoder decodeIntegerForKey:@"startingItemNumber"];
+	}
+	return self;
+}
+
+- (void)encodeWithCoder:(NSCoder *)aCoder {
+	[aCoder encodeBool:_inherit forKey:@"inherit"];
+	[aCoder encodeInteger:_type forKey:@"type"];
+	[aCoder encodeInteger:_position forKey:@"position"];
+	[aCoder encodeObject:_imageName forKey:@"imageName"];
+	[aCoder encodeInteger:_startingItemNumber forKey:@"startingItemNumber"];
+}
 
 // convert string to listStyleType
 + (DTCSSListStyleType)listStyleTypeFromString:(NSString *)string
@@ -241,9 +260,75 @@
 	}
 }
 
+#ifndef COVERAGE
+// exclude methods from coverage testing
+
 - (NSString *)description
 {
 	return [NSString stringWithFormat:@"<%@ %p type=%d position=%d>", NSStringFromClass([self class]), self, (int)_type, (int)_position];
+}
+
+- (NSUInteger)hash
+{
+	NSUInteger calcHash = 7;
+	
+	calcHash = calcHash*31 + [_imageName hash];
+	calcHash = calcHash*31 + (NSUInteger)_type;
+	calcHash = calcHash*31 + (NSUInteger)_position;
+	calcHash = calcHash*31 + (NSUInteger)_startingItemNumber;
+	calcHash = calcHash*31 + (NSUInteger)_inherit;
+	
+	return calcHash;
+}
+
+#endif
+
+/*
+ Note: this is not isEqual: because on iOS 7 -[NSMutableAttributedString initWithString:attributes:] calls this via -[NSArray isEqualToArray:]. There isEqual: needs to be returning NO, because otherwise there is some weird internal caching side effect where it reuses previous list arrays
+ */
+- (BOOL)isEqualToListStyle:(DTCSSListStyle *)otherListStyle
+{
+	if (!otherListStyle)
+	{
+		return NO;
+	}
+	
+	if (otherListStyle == self)
+	{
+		return YES;
+	}
+	
+	if (![otherListStyle isKindOfClass:[DTCSSListStyle class]])
+	{
+		return NO;
+	}
+	
+	if (_inherit != otherListStyle->_inherit)
+	{
+		return NO;
+	}
+	
+	if (_type != otherListStyle->_type)
+	{
+		return NO;
+	}
+	
+	if (_position != otherListStyle->_position)
+	{
+		return NO;
+	}
+	
+	if (_startingItemNumber != otherListStyle->_startingItemNumber)
+	{
+		return NO;
+	}
+	
+	if (_imageName == otherListStyle->_imageName)
+	{
+		return YES;
+	}
+	
+	return ([_imageName isEqualToString:otherListStyle->_imageName]);
 }
 
 #pragma mark Copying

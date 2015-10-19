@@ -6,7 +6,10 @@
 //  Copyright 2011 Drobnik.com. All rights reserved.
 //
 
+#import <ImageIO/ImageIO.h>
 #import "DTLazyImageView.h"
+
+#import <DTFoundation/DTLog.h>
 
 static NSCache *_imageCache = nil;
 
@@ -26,18 +29,17 @@ NSString * const DTLazyImageViewDidFinishDownloadNotification = @"DTLazyImageVie
 	
 	NSURLConnection *_connection;
 	NSMutableData *_receivedData;
-
+	
 	/* For progressive download */
 	CGImageSourceRef _imageSource;
 	CGFloat _fullHeight;
 	CGFloat _fullWidth;
 	NSUInteger _expectedSize;
-    
-    BOOL shouldShowProgressiveDownload;
 	
-	__unsafe_unretained id<DTLazyImageViewDelegate> _delegate;
+	BOOL shouldShowProgressiveDownload;
+	
+	DT_WEAK_VARIABLE id<DTLazyImageViewDelegate> _delegate;
 }
-@synthesize delegate=_delegate;
 
 - (void)dealloc
 {
@@ -49,17 +51,17 @@ NSString * const DTLazyImageViewDidFinishDownloadNotification = @"DTLazyImageVie
 
 - (void)loadImageAtURL:(NSURL *)url
 {
-	if ([NSThread isMainThread])
-	{
-		[self performSelectorInBackground:@selector(loadImageAtURL:) withObject:url];
-		return;
-	}
-	
 	// local files we don't need to get asynchronously
 	if ([url isFileURL] || [url.scheme isEqualToString:@"data"])
 	{
-		NSData *data = [NSData dataWithContentsOfURL:url];
-		[self completeDownloadWithData:data];
+		dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+			NSData *data = [NSData dataWithContentsOfURL:url];
+			
+			dispatch_async(dispatch_get_main_queue(), ^{
+				[self completeDownloadWithData:data];
+			});
+		});
+		
 		return;
 	}
 	
@@ -81,9 +83,6 @@ NSString * const DTLazyImageViewDidFinishDownloadNotification = @"DTLazyImageVie
 		[[NSNotificationCenter defaultCenter] postNotificationName:DTLazyImageViewWillStartDownloadNotification object:self];
 		
 		[_connection start];
-	
-		// necessary because otherwise otherwise the delegate methods would not get delivered
-		CFRunLoopRun();
 	}
 }
 
@@ -124,8 +123,8 @@ NSString * const DTLazyImageViewDidFinishDownloadNotification = @"DTLazyImageVie
 {
 	const size_t height = CGImageGetHeight(partialImg);
 	CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
-	size_t lFullWidth = lrintf(_fullWidth);
-	size_t lFullHeight = lrintf(_fullHeight);
+	size_t lFullWidth = (size_t)ceil(_fullWidth);
+	size_t lFullHeight = (size_t)ceil(_fullHeight);
 	CGContextRef bmContext = CGBitmapContextCreate(NULL, lFullWidth, lFullHeight, 8, lFullWidth * 4, colorSpace, kCGBitmapByteOrderDefault | kCGImageAlphaPremultipliedFirst);
 	CGColorSpaceRelease(colorSpace);
 	if (!bmContext)
@@ -198,9 +197,7 @@ NSString * const DTLazyImageViewDidFinishDownloadNotification = @"DTLazyImageVie
 	self.image = image;
 	_fullWidth = image.size.width;
 	_fullHeight = image.size.height;
-	
-	self.bounds = CGRectMake(0, 0, _fullWidth, _fullHeight);
-	
+
 	[self _notifyDelegate];
 	
 	static dispatch_once_t predicate;
@@ -218,10 +215,9 @@ NSString * const DTLazyImageViewDidFinishDownloadNotification = @"DTLazyImageVie
 		}
 		else
 		{
-			NSLog(@"Warning, %@ did not get an image for %@", NSStringFromClass([self class]), [_url absoluteString]);
+			DTLogWarning(@"Warning, %@ did not get an image for %@", NSStringFromClass([self class]), [_url absoluteString]);
 		}
 	}
-	
 }
 
 - (void)connection:(NSURLConnection *)connection didReceiveResponse:(NSURLResponse *)response
@@ -252,7 +248,7 @@ NSString * const DTLazyImageViewDidFinishDownloadNotification = @"DTLazyImageVie
 {
 	[_receivedData appendData:data];
 	
-	if (!CGImageSourceCreateIncremental || !shouldShowProgressiveDownload)
+	if (!&CGImageSourceCreateIncremental || !shouldShowProgressiveDownload)
 	{
 		// don't show progressive
 		return;
@@ -311,13 +307,15 @@ NSString * const DTLazyImageViewDidFinishDownloadNotification = @"DTLazyImageVie
 
 #pragma mark Properties
 
-- (void) setUrlRequest:(NSMutableURLRequest *)request {
+- (void) setUrlRequest:(NSMutableURLRequest *)request
+{
 	_urlRequest = request;
 	self.url = [_urlRequest URL];
 }
 
-@synthesize url = _url;
+@synthesize delegate=_delegate;
 @synthesize shouldShowProgressiveDownload;
+@synthesize url = _url;
 @synthesize urlRequest = _urlRequest;
 
 @end

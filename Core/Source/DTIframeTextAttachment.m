@@ -6,7 +6,10 @@
 //  Copyright (c) 2013 Drobnik.com. All rights reserved.
 //
 
-#import "DTCoreText.h"
+#import "DTIframeTextAttachment.h"
+#import "DTCoreTextConstants.h"
+#import "DTHTMLElement.h"
+#import "NSString+HTML.h"
 
 @implementation DTIframeTextAttachment
 
@@ -19,6 +22,11 @@
 		// get base URL
 		NSURL *baseURL = [options objectForKey:NSBaseURLDocumentOption];
 		NSString *src = [element.attributes objectForKey:@"src"];
+		
+		// prepend http: if URL string starts with // (seems to do with youtube iframes as standard)
+		if ([[src substringToIndex:2] isEqualToString:@"//"]) {
+			src = [@"http:" stringByAppendingString:src];
+		}
 		
 		// content URL
 		_contentURL = [NSURL URLWithString:src relativeToURL:baseURL];

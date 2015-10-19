@@ -9,6 +9,7 @@
 #import "DemoSnippetsViewController.h"
 #import "DemoTextViewController.h"
 #import "DemoAboutViewController.h"
+#import "AutoLayoutDemoViewController.h"
 
 // identifier for cell reuse
 NSString * const AttributedTextCellReuseIdentifier = @"AttributedTextCellReuseIdentifier";
@@ -64,7 +65,7 @@ NSString * const AttributedTextCellReuseIdentifier = @"AttributedTextCellReuseId
 	[self.tableView registerClass:[DTAttributedTextCell class] forCellReuseIdentifier:AttributedTextCellReuseIdentifier];
 #endif
 	
-	self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"About" style:UIBarButtonItemStyleBordered target:self action:@selector(showAbout:)];
+	self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"About" style:UIBarButtonItemStylePlain target:self action:@selector(showAbout:)];
 }
 
 
@@ -120,7 +121,7 @@ NSString * const AttributedTextCellReuseIdentifier = @"AttributedTextCellReuseId
 - (DTAttributedTextCell *)tableView:(UITableView *)tableView preparedCellForIndexPath:(NSIndexPath *)indexPath
 {
 	// workaround for iOS 5 bug
-	NSString *key = [NSString stringWithFormat:@"%d-%d", indexPath.section, indexPath.row];
+	NSString *key = [NSString stringWithFormat:@"%ld-%ld", (long)indexPath.section, (long)indexPath.row];
 	
 	DTAttributedTextCell *cell = [cellCache objectForKey:key];
 
@@ -173,12 +174,19 @@ NSString * const AttributedTextCellReuseIdentifier = @"AttributedTextCellReuseId
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath 
 {
 	NSDictionary *rowSnippet = [_snippets objectAtIndex:indexPath.row];
-	
-	DemoTextViewController *viewController = [[DemoTextViewController alloc] init];
-	viewController.fileName = [rowSnippet objectForKey:@"File"];
-	viewController.baseURL = [NSURL URLWithString:[rowSnippet  objectForKey:@"BaseURL"]];
-	
-	[self.navigationController pushViewController:viewController animated:YES];
+
+    if (rowSnippet[@"AutoLayoutTest"]) {
+        AutoLayoutDemoViewController *viewController = [[AutoLayoutDemoViewController alloc] init];
+        viewController.fileName = rowSnippet[@"File"];
+        [self.navigationController pushViewController:viewController animated:YES];
+    }
+    else {
+        DemoTextViewController *viewController = [[DemoTextViewController alloc] init];
+        viewController.fileName = [rowSnippet objectForKey:@"File"];
+        viewController.baseURL = [NSURL URLWithString:[rowSnippet  objectForKey:@"BaseURL"]];
+
+        [self.navigationController pushViewController:viewController animated:YES];
+    }
 }
 
 @end

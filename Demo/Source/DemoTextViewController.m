@@ -10,8 +10,8 @@
 #import <QuartzCore/QuartzCore.h>
 #import <MediaPlayer/MediaPlayer.h>
 
-#import "DTVersion.h"
 #import "DTTiledLayerWithoutFade.h"
+
 
 @interface DemoTextViewController ()
 - (void)_segmentedControlChanged:(id)sender;
@@ -21,6 +21,7 @@
 - (void)debugButton:(UIBarButtonItem *)sender;
 
 @property (nonatomic, strong) NSMutableSet *mediaPlayers;
+@property (nonatomic, strong) NSArray *contentViews;
 
 @end
 
@@ -30,6 +31,8 @@
 	NSString *_fileName;
 	
 	UISegmentedControl *_segmentedControl;
+	UISegmentedControl *_htmlOutputTypeSegment;
+	
 	DTAttributedTextView *_textView;
 	UITextView *_rangeView;
 	UITextView *_charsView;
@@ -41,6 +44,8 @@
 	// private
 	NSURL *lastActionLink;
 	NSMutableSet *mediaPlayers;
+	
+	BOOL _needsAdjustInsetsOnLayout;
 }
 
 
@@ -53,20 +58,23 @@
 	{
 		NSMutableArray *items = [[NSMutableArray alloc] initWithObjects:@"View", @"Ranges", @"Chars", @"HTML", nil];
 		
-		if (![DTVersion osVersionIsLessThen:@"6.0"])
+#ifdef DTCORETEXT_SUPPORT_NS_ATTRIBUTES
+		if (floor(NSFoundationVersionNumber) >= DTNSFoundationVersionNumber_iOS_6_0)
 		{
 			[items addObject:@"iOS 6"];
 		}
+#endif
 		
 		_segmentedControl = [[UISegmentedControl alloc] initWithItems:items];
-		_segmentedControl.segmentedControlStyle = UISegmentedControlStyleBar;
 		_segmentedControl.selectedSegmentIndex = 0;
 		[_segmentedControl addTarget:self action:@selector(_segmentedControlChanged:) forControlEvents:UIControlEventValueChanged];
 		self.navigationItem.titleView = _segmentedControl;	
 		
-		UIBarButtonItem *debug = [[UIBarButtonItem alloc] initWithTitle:@"Debug Frames" style:UIBarButtonItemStyleBordered target:self action:@selector(debugButton:)];
-		NSArray *toolbarItems = [NSArray arrayWithObject:debug];
-		[self setToolbarItems:toolbarItems];
+		[self _updateToolbarForMode];
+		
+		_needsAdjustInsetsOnLayout = YES;
+		
+		self.automaticallyAdjustsScrollViewInsets = YES;
 	}
 	return self;
 }
@@ -84,6 +92,40 @@
 
 
 #pragma mark UIViewController
+
+- (void)_updateToolbarForMode
+{
+	NSMutableArray *toolbarItems = [NSMutableArray array];
+	
+	UIBarButtonItem *debug = [[UIBarButtonItem alloc] initWithTitle:@"Debug Frames" style:UIBarButtonItemStylePlain target:self action:@selector(debugButton:)];
+	[toolbarItems addObject:debug];
+	
+	UIBarButtonItem *space = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil];
+	[toolbarItems addObject:space];
+	
+	UIBarButtonItem *screenshot = [[UIBarButtonItem alloc] initWithTitle:@"Screenshot" style:UIBarButtonItemStylePlain target:self action:@selector(screenshot:)];
+	[toolbarItems addObject:screenshot];
+	
+	if (_segmentedControl.selectedSegmentIndex == 3)
+	{
+		if (!_htmlOutputTypeSegment)
+		{
+			_htmlOutputTypeSegment = [[UISegmentedControl alloc] initWithItems:@[@"Document", @"Fragment"]];
+			_htmlOutputTypeSegment.selectedSegmentIndex = 0;
+			
+			[_htmlOutputTypeSegment addTarget:self action:@selector(_htmlModeChanged:) forControlEvents:UIControlEventValueChanged];
+		}
+	
+		UIBarButtonItem *spacer = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:NULL];
+		[toolbarItems addObject:spacer];
+	
+		UIBarButtonItem *htmlMode = [[UIBarButtonItem alloc] initWithCustomView:_htmlOutputTypeSegment];
+	
+		[toolbarItems addObject:htmlMode];
+	}
+
+	[self setToolbarItems:toolbarItems];
+}
 
 - (void)loadView {
 	[super loadView];
@@ -116,6 +158,10 @@
 	_textView.shouldDrawLinks = NO;
 	_textView.textDelegate = self; // delegate for custom sub views
 	
+	// gesture for testing cursor positions
+	UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleTap:)];
+	[_textView addGestureRecognizer:tap];
+	
 	// set an inset. Since the bottom is below a toolbar inset by 44px
 	[_textView setScrollIndicatorInsets:UIEdgeInsetsMake(0, 0, 44, 0)];
 	_textView.contentInset = UIEdgeInsetsMake(10, 10, 54, 10);
@@ -130,6 +176,8 @@
 	_iOS6View.contentInset = UIEdgeInsetsMake(10, 0, 10, 0);
 	_iOS6View.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
 	[self.view addSubview:_iOS6View];
+	
+	self.contentViews = @[_charsView, _rangeView, _htmlView, _textView, _iOS6View];
 }
 
 
@@ -212,6 +260,65 @@
 	[super viewWillDisappear:animated];
 }
 
+- (BOOL)prefersStatusBarHidden
+{
+	// prevent hiding of status bar in landscape because this messes up the layout guide calc
+	return NO;
+}
+
+- (void)willRotateToInterfaceOrientation:(UIInterfaceOrientation)toInterfaceOrientation duration:(NSTimeInterval)duration
+{
+	_needsAdjustInsetsOnLayout = YES;
+}
+
+// this is only called on >= iOS 5
+- (void)viewDidLayoutSubviews
+{
+	[super viewDidLayoutSubviews];
+	
+	if (![self respondsToSelector:@selector(topLayoutGuide)] || !_needsAdjustInsetsOnLayout)
+	{
+		return;
+	}
+	
+	// this also compiles with iOS 6 SDK, but will work with later SDKs too
+	CGFloat topInset = [[self valueForKeyPath:@"topLayoutGuide.length"] floatValue];
+	CGFloat bottomInset = [[self valueForKeyPath:@"bottomLayoutGuide.length"] floatValue];
+	
+	NSLog(@"%f top", topInset);
+	
+	UIEdgeInsets outerInsets = UIEdgeInsetsMake(topInset, 0, bottomInset, 0);
+	UIEdgeInsets innerInsets = outerInsets;
+	innerInsets.left += 10;
+	innerInsets.right += 10;
+	innerInsets.top += 10;
+	innerInsets.bottom += 10;
+	
+	CGPoint innerScrollOffset = CGPointMake(-innerInsets.left, -innerInsets.top);
+	CGPoint outerScrollOffset = CGPointMake(-outerInsets.left, -outerInsets.top);
+	
+	_textView.contentInset = innerInsets;
+	_textView.contentOffset = innerScrollOffset;
+	_textView.scrollIndicatorInsets = outerInsets;
+	
+	_iOS6View.contentInset = outerInsets;
+	_iOS6View.contentOffset = outerScrollOffset;
+	_iOS6View.scrollIndicatorInsets = outerInsets;
+
+	_charsView.contentInset = outerInsets;
+	_charsView.contentOffset = outerScrollOffset;
+	_charsView.scrollIndicatorInsets = outerInsets;
+	
+	_rangeView.contentInset = outerInsets;
+	_rangeView.contentOffset = outerScrollOffset;
+	_rangeView.scrollIndicatorInsets = outerInsets;
+	
+	_htmlView.contentInset = outerInsets;
+	_htmlView.contentOffset = outerScrollOffset;
+	_htmlView.scrollIndicatorInsets = outerInsets;
+	
+	_needsAdjustInsetsOnLayout = NO;
+}
 
 #pragma mark Private Methods
 
@@ -230,7 +337,7 @@
 				
 				while ((attributes = [_textView.attributedString attributesAtIndex:effectiveRange.location effectiveRange:&effectiveRange]))
 				{
-					[dumpOutput appendFormat:@"Range: (%d, %d), %@\n\n", effectiveRange.location, effectiveRange.length, attributes];
+					[dumpOutput appendFormat:@"Range: (%lu, %lu), %@\n\n", (unsigned long)effectiveRange.location, (unsigned long)effectiveRange.length, attributes];
 					effectiveRange.location += effectiveRange.length;
 					
 					if (effectiveRange.location >= [_textView.attributedString length])
@@ -252,7 +359,7 @@
 				char *bytes = (char *)[dump bytes];
 				char b = bytes[i];
 				
-				[dumpOutput appendFormat:@"%i: %x %c\n", i, b, b];
+				[dumpOutput appendFormat:@"%li: %x %c\n", (long)i, b, b];
 			}
 			_charsView.text = dumpOutput;
 			
@@ -260,7 +367,15 @@
 		}
 		case 3:
 		{
-			_htmlView.text = [_textView.attributedString htmlString];
+			if (_htmlOutputTypeSegment.selectedSegmentIndex == 0)
+			{
+				_htmlView.text = [_textView.attributedString htmlString];
+			}
+			else
+			{
+				_htmlView.text = [_textView.attributedString htmlFragment];
+			}
+			
 			break;
 		}
 		case 4:
@@ -293,6 +408,7 @@
 		case 3:
 		{
 			selectedView = _htmlView;
+			
 			break;
 		}
 			
@@ -306,8 +422,21 @@
 	// refresh only this tab
 	[self updateDetailViewForIndex:_segmentedControl.selectedSegmentIndex];
 	
+	// Hide all views except for the selected view to not conflict with VoiceOver
+	for (UIView *view in self.contentViews)
+		view.hidden = YES;
+	selectedView.hidden = NO;
+	
 	[self.view bringSubviewToFront:selectedView];
 	[selectedView flashScrollIndicators];
+	
+	[self _updateToolbarForMode];
+}
+
+- (void)_htmlModeChanged:(id)sender
+{
+	// refresh only this tab
+	[self updateDetailViewForIndex:_segmentedControl.selectedSegmentIndex];
 }
 
 
@@ -465,12 +594,16 @@
 	else if ([attachment isKindOfClass:[DTObjectTextAttachment class]])
 	{
 		// somecolorparameter has a HTML color
-		UIColor *someColor = [UIColor colorWithHTMLName:[attachment.attributes objectForKey:@"somecolorparameter"]];
+		NSString *colorName = [attachment.attributes objectForKey:@"somecolorparameter"];
+		UIColor *someColor = DTColorCreateWithHTMLName(colorName);
 		
 		UIView *someView = [[UIView alloc] initWithFrame:frame];
 		someView.backgroundColor = someColor;
 		someView.layer.borderWidth = 1;
 		someView.layer.borderColor = [UIColor blackColor].CGColor;
+		
+		someView.accessibilityLabel = colorName;
+		someView.isAccessibilityElement = YES;
 		
 		return someView;
 	}
@@ -549,13 +682,54 @@
 	}
 }
 
+- (void)handleTap:(UITapGestureRecognizer *)gesture
+{
+	if (gesture.state == UIGestureRecognizerStateRecognized)
+	{
+		CGPoint location = [gesture locationInView:_textView];
+		NSUInteger tappedIndex = [_textView closestCursorIndexToPoint:location];
+		
+		NSString *plainText = [_textView.attributedString string];
+		NSString *tappedChar = [plainText substringWithRange:NSMakeRange(tappedIndex, 1)];
+		
+		__block NSRange wordRange = NSMakeRange(0, 0);
+		
+		[plainText enumerateSubstringsInRange:NSMakeRange(0, [plainText length]) options:NSStringEnumerationByWords usingBlock:^(NSString *substring, NSRange substringRange, NSRange enclosingRange, BOOL *stop) {
+			if (NSLocationInRange(tappedIndex, enclosingRange))
+			{
+				*stop = YES;
+				wordRange = substringRange;
+			}
+		}];
+		
+		NSString *word = [plainText substringWithRange:wordRange];
+		NSLog(@"%lu: '%@' word: '%@'", (unsigned long)tappedIndex, tappedChar, word);
+	}
+}
+
 - (void)debugButton:(UIBarButtonItem *)sender
 {
 	[DTCoreTextLayoutFrame setShouldDrawDebugFrames:![DTCoreTextLayoutFrame shouldDrawDebugFrames]];
 	[_textView.attributedTextContentView setNeedsDisplay];
 }
 
-#pragma mark DTLazyImageViewDelegate
+- (void)screenshot:(UIBarButtonItem *)sender
+{
+	UIWindow *keyWindow = [[UIApplication sharedApplication] keyWindow];
+	
+	CGRect rect = [keyWindow bounds];
+	UIGraphicsBeginImageContextWithOptions(rect.size, YES, 0);
+	
+	CGContextRef context = UIGraphicsGetCurrentContext();
+	[keyWindow.layer renderInContext:context];
+	
+	UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
+	UIGraphicsEndImageContext();
+	
+	[[UIPasteboard generalPasteboard] setImage:image];
+}
+
+#pragma mark - DTLazyImageViewDelegate
 
 - (void)lazyImageView:(DTLazyImageView *)lazyImageView didChangeImageSize:(CGSize)size {
 	NSURL *url = lazyImageView.url;

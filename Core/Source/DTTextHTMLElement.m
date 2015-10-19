@@ -11,7 +11,7 @@
 #import "DTCoreTextFontDescriptor.h"
 #import "NSAttributedString+SmallCaps.h"
 
-#if DTCORETEXT_SUPPORT_NS_ATTRIBUTES && TARGET_OS_IPHONE
+#if TARGET_OS_IPHONE
 #import "UIFont+DTCoreText.h"
 #endif
 
@@ -23,7 +23,7 @@
 - (void)_appendHTMLToString:(NSMutableString *)string indentLevel:(NSUInteger)indentLevel
 {
 	// indent to the level
-	for (int i=0; i<indentLevel; i++)
+	for (NSUInteger i=0; i<indentLevel; i++)
 	{
 		[string appendString:@"   "];
 	}
@@ -67,7 +67,7 @@
 			text = [_text stringByNormalizingWhitespace];
 		}
 		
-		NSDictionary *attributes = [self attributesDictionary];
+		NSDictionary *attributes = [self attributesForAttributedStringRepresentation];
 		
 		if (self.fontVariant == DTHTMLElementFontVariantNormal)
 		{
@@ -80,22 +80,26 @@
 			{
 				DTCoreTextFontDescriptor *smallDesc = [self.fontDescriptor copy];
 				smallDesc.smallCapsFeature = YES;
-				
-				CTFontRef smallerFont = [smallDesc newMatchingFont];
+
 				NSMutableDictionary *smallAttributes = [attributes mutableCopy];
-				
+
+				CTFontRef smallerFont = [smallDesc newMatchingFont];
+
+				if (smallerFont)
+				{
 #if DTCORETEXT_SUPPORT_NS_ATTRIBUTES && TARGET_OS_IPHONE
-				if (___useiOS6Attributes)
-				{
-					UIFont *font = [UIFont fontWithCTFont:smallerFont];
-					
-					[smallAttributes setObject:font forKey:NSFontAttributeName];
-					CFRelease(smallerFont);
-				}
-				else
+					if (___useiOS6Attributes)
+					{
+						UIFont *font = [UIFont fontWithCTFont:smallerFont];
+						
+						[smallAttributes setObject:font forKey:NSFontAttributeName];
+						CFRelease(smallerFont);
+					}
+					else
 #endif
-				{
-					[smallAttributes setObject:CFBridgingRelease(smallerFont) forKey:(id)kCTFontAttributeName];
+					{
+						[smallAttributes setObject:CFBridgingRelease(smallerFont) forKey:(id)kCTFontAttributeName];
+					}
 				}
 				
 				return [[NSAttributedString alloc] initWithString:_text attributes:smallAttributes];

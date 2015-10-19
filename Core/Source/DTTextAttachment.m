@@ -7,15 +7,17 @@
 //
 
 #import "DTTextAttachment.h"
-#import "DTCoreText.h"
-#import "DTUtils.h"
-
-#import "DTBase64Coding.h"
+#import "DTCoreGraphicsUtils.h"
+#import "DTHTMLElement.h"
 #import "DTDictationPlaceholderTextAttachment.h"
 #import "DTIframeTextAttachment.h"
 #import "DTImageTextAttachment.h"
 #import "DTObjectTextAttachment.h"
 #import "DTVideoTextAttachment.h"
+#import "NSCoder+DTCompatibility.h"
+
+#import <DTFoundation/DTLog.h>
+
 
 static NSMutableDictionary *_classForTagNameLookup = nil;
 
@@ -65,6 +67,27 @@ static NSMutableDictionary *_classForTagNameLookup = nil;
 	return [attachment initWithElement:element options:options];
 }
 
+- (instancetype)initWithCoder:(NSCoder *)aDecoder {
+	self = [super init];
+	if (self) {
+		_displaySize = [aDecoder decodeCGSizeForKey:@"displaySize"];
+		_originalSize = [aDecoder decodeCGSizeForKey:@"originalSize"];
+		_maxImageSize = [aDecoder decodeCGSizeForKey:@"maxImageSize"];
+		_contentURL = [aDecoder decodeObjectForKey:@"contentURL"];
+		_attributes = [aDecoder decodeObjectForKey:@"attributes"];
+		_verticalAlignment = [aDecoder decodeIntegerForKey:@"verticalAlignment"];
+	}
+	return self;
+}
+
+- (void)encodeWithCoder:(NSCoder *)aCoder {
+	[aCoder encodeCGSize:_displaySize forKey:@"displaySize"];
+	[aCoder encodeCGSize:_originalSize forKey:@"originalSize"];
+	[aCoder encodeCGSize:_maxImageSize forKey:@"maxImageSize"];
+	[aCoder encodeObject:_contentURL forKey:@"contentURL"];
+	[aCoder encodeObject:_attributes forKey:@"attributes"];
+	[aCoder encodeInteger:_verticalAlignment forKey:@"verticalAlignment"];
+}
 
 - (id)initWithElement:(DTHTMLElement *)element options:(NSDictionary *)options
 {
@@ -162,7 +185,7 @@ static NSMutableDictionary *_classForTagNameLookup = nil;
 
 	if (previousClass)
 	{
-		NSLog(@"Warning: replacing previously registered class '%@' for tag name '%@' with '%@'", NSStringFromClass(previousClass), tagName, NSStringFromClass(class));
+		DTLogDebug(@"Replacing previously registered class '%@' for tag name '%@' with '%@'", NSStringFromClass(previousClass), tagName, NSStringFromClass(class));
 	}
 	
 	[_classForTagNameLookup setObject:class forKey:tagName];
@@ -175,14 +198,14 @@ static NSMutableDictionary *_classForTagNameLookup = nil;
 
 #pragma mark Properties
 /** Mutator for originalSize. Sets displaySize to the same value as originalSize. 
- @param The CGSize to store in originalSize. */
+ @param originalSize The CGSize to store in originalSize. */
 - (void)setOriginalSize:(CGSize)originalSize
 {
 	if (!CGSizeEqualToSize(originalSize, _originalSize))
 	{
 		_originalSize = originalSize;
 		
-		if (!_displaySize.width || !_displaySize.height)
+		if (_displaySize.width==0 || _displaySize.height==0)
 		{
 			[self setDisplaySize:_originalSize withMaxDisplaySize:_maxImageSize];
 		}
@@ -191,24 +214,24 @@ static NSMutableDictionary *_classForTagNameLookup = nil;
 
 - (void)setDisplaySize:(CGSize)displaySize withMaxDisplaySize:(CGSize)maxDisplaySize
 {
-	if (_originalSize.width && _originalSize.height)
+	if (_originalSize.width!=0 && _originalSize.height!=0)
 	{
 		// width and/or height missing
 		if (displaySize.width==0 && displaySize.height==0)
 		{
 			displaySize = _originalSize;
 		}
-		else if (!displaySize.width && displaySize.height)
+		else if (displaySize.width==0 && displaySize.height!=0)
 		{
 			// width missing, calculate it
 			CGFloat factor = _originalSize.height / displaySize.height;
-			displaySize.width = roundf(_originalSize.width / factor);
+			displaySize.width = round(_originalSize.width / factor);
 		}
-		else if (displaySize.width>0 && displaySize.height==0)
+		else if (displaySize.width!=0 && displaySize.height==0)
 		{
 			// height missing, calculate it
 			CGFloat factor = _originalSize.width / displaySize.width;
-			displaySize.height = roundf(_originalSize.height / factor);
+			displaySize.height = round(_originalSize.height / factor);
 		}
 	}
 
@@ -216,7 +239,7 @@ static NSMutableDictionary *_classForTagNameLookup = nil;
 	{
 		if (maxDisplaySize.width < displaySize.width || maxDisplaySize.height < displaySize.height)
 		{
-			displaySize = sizeThatFitsKeepingAspectRatio(displaySize, maxDisplaySize);
+			displaySize = DTCGSizeThatFitsKeepingAspectRatio(displaySize, maxDisplaySize);
 		}
 	}
 	

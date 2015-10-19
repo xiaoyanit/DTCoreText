@@ -81,7 +81,7 @@ Open the destination project and create an "Externals" group.
 
 Add files… or drag `DTCoreText.xcodeproj` to the Externals group. Make sure to uncheck the Copy checkbox. You want to create a reference, not a copy.
 
-![DTCoreText_Reference](DTCoreText_Reference.png =258x352)
+![DTCoreText_Reference](DTCoreText_Reference.png)
 
 #### Adding Dependencies
 
@@ -100,15 +100,15 @@ You can move all the additional framework and library links that Xcode adds into
 
 #### Setting up Header Search Paths
 
-For Xcode to find the headers of DTCoreText add `Externals/DTCoreText/Core` to the *User Header Search Paths*. Make sure you select the *Recursive* check box.
+For Xcode to find the headers of DTCoreText add `${TARGET_BUILD_DIR}` to the *Header Search Paths*.
 
-![DTCoreText_Reference](DTCoreText_Search_Paths.png =749x142)
+![DTCoreText_Reference](DTCoreText_Search_Paths.png)
 
 #### Setting Linker Flags
 
 For the linker to be able to find the symbols of DTCoreText, specifically category methods, you need to add the `-ObjC` linker flag:
 
-![DTCoreText_Reference](DTCoreText_Linker_Flags.png =750x120)
+![DTCoreText_Reference](DTCoreText_Linker_Flags.png)
 
 In Xcode versions before 4.6 you also needed the `-all_load` flag but that appears to no longer be necessary.
 
@@ -123,7 +123,7 @@ The `default.css` stylesheet that is used for defining the default HTML CSS styl
 At this point your project should build and be able to use DTCoreText functionality. As a quick *Smoke Test* - to see if all is setup correctly - you can test your setup by adding this code to your app delegate:
 
 
-    #import "DTCoreText.h"
+    #import <DTCoreText/DTCoreText.h>
 
     NSString *html = @"<p>Some Text</p>";
     NSData *data = [html dataUsingEncoding:NSUTF8StringEncoding];

@@ -1,13 +1,24 @@
 //
-//  DTTextAttachmentImage.m
+//  DTImageTextAttachment.m
 //  DTCoreText
 //
 //  Created by Oliver Drobnik on 22.04.13.
 //  Copyright (c) 2013 Drobnik.com. All rights reserved.
 //
 
-#import "DTCoreText.h"
-#import "DTBase64Coding.h"
+#import "DTCompatibility.h"
+#import "DTImageTextAttachment.h"
+#import "DTCoreTextConstants.h"
+#import "DTHTMLElement.h"
+#import "NSString+CSS.h"
+#import "NSString+HTML.h"
+#import "DTImage+HTML.h"
+
+#if TARGET_OS_IPHONE
+	#import <DTFoundation/DTAnimatedGIF.h>
+#endif
+
+#import <DTFoundation/DTBase64Coding.h>
 
 static NSCache *imageCache = nil;
 
@@ -23,17 +34,26 @@ static NSCache *imageCache = nil;
 	DTImage *_image;
 }
 
+- (instancetype)initWithCoder:(NSCoder *)aDecoder {
+	self = [super initWithCoder:aDecoder];
+	if (self) {
+		_image = [aDecoder decodeObjectForKey:@"image"];
+	}
+	return self;
+}
+
+- (void)encodeWithCoder:(NSCoder *)aCoder {
+	[super encodeWithCoder:aCoder];
+	[aCoder encodeObject:_image forKey:@"image"];
+}
+
 - (id)initWithElement:(DTHTMLElement *)element options:(NSDictionary *)options
 {
 	self = [super initWithElement:element options:options];
 	
 	if (self)
 	{
-		// get base URL
-		NSURL *baseURL = [options objectForKey:NSBaseURLDocumentOption];
-		NSString *src = [element.attributes objectForKey:@"src"];
-		
-		[self _decodeImageSrc:src relativeToBaseURL:baseURL];
+		[self _decodeImageFromElement:element options:options];
 	}
 	
 	return self;
@@ -52,8 +72,12 @@ static NSCache *imageCache = nil;
 }
 
 
-- (void)_decodeImageSrc:(NSString *)src relativeToBaseURL:(NSURL *)baseURL
+- (void)_decodeImageFromElement:(DTHTMLElement *)element options:(NSDictionary *)options
 {
+	// get base URL
+	NSURL *baseURL = [options objectForKey:NSBaseURLDocumentOption];
+	NSString *src = [element.attributes objectForKey:@"src"];
+	
 	NSURL *contentURL = nil;
 	
 	// decode content URL
@@ -84,7 +108,52 @@ static NSCache *imageCache = nil;
 			// if we have image data, get the default display size
 			if (decodedData)
 			{
-				self.image = [[DTImage alloc] initWithData:decodedData];
+				DTImage *decodedImage = [[DTImage alloc] initWithData:decodedData];
+				
+				// we don't know the content scale from such images, need to infer it from size in style
+				NSString *styles = [element.attributes objectForKey:@"style"];
+				
+				// that only works if there is a style dictionary
+				if (styles)
+				{
+					NSDictionary *attributes = [styles dictionaryOfCSSStyles];
+					
+					NSString *widthStr = attributes[@"width"];
+					NSString *heightStr = attributes[@"height"];
+					
+					if ([widthStr hasSuffix:@"px"] && [heightStr hasSuffix:@"px"])
+					{
+						CGSize sizeAccordingToStyle;
+						
+						// those style size values are the original image size
+						sizeAccordingToStyle.width = [widthStr pixelSizeOfCSSMeasureRelativeToCurrentTextSize:0 textScale:1];
+						sizeAccordingToStyle.height = [heightStr pixelSizeOfCSSMeasureRelativeToCurrentTextSize:0 textScale:1];
+						
+						// if _orgiginal width and height are a fraction of decode image size, it must be a scaled image
+						if (sizeAccordingToStyle.width != 0 && sizeAccordingToStyle.width < decodedImage.size.width &&
+							 sizeAccordingToStyle.height != 0 && sizeAccordingToStyle.height < decodedImage.size.height)
+						{
+							// determine image scale
+							CGFloat scale = round(decodedImage.size.width/sizeAccordingToStyle.width);
+							
+							// sanity check, accept from @2x - @5x
+							if (scale>=2.0 && scale<=5.0)
+							{
+#if TARGET_OS_IPHONE
+								// on iOS change the scale by making a new image with same pixels
+								decodedImage = [DTImage imageWithCGImage:decodedImage.CGImage scale:scale orientation:decodedImage.imageOrientation];
+#else
+								// on OS X we can set the size
+								[decodedImage setSize:sizeAccordingToStyle];
+#endif
+							}
+						}
+					}
+				}
+				
+				self.image = decodedImage;
+				
+				// prevent remote loading of image
 				_contentURL = nil;
 			}
 		}
@@ -108,7 +177,7 @@ static NSCache *imageCache = nil;
 				else
 				{
 					// file in app bundle
-					NSBundle *bundle = [NSBundle mainBundle];
+					NSBundle *bundle = [NSBundle bundleForClass:[self class]];
 					NSString *path = [bundle pathForResource:src ofType:nil];
 					
 					if (path)
@@ -134,7 +203,7 @@ static NSCache *imageCache = nil;
 	}
 	
 	// if it's a local file we need to inspect it to get it's dimensions
-	if (!_displaySize.width || !_displaySize.height)
+	if (_displaySize.width==0 || _displaySize.height==0)
 	{
 		DTImage *image = _image;
 		
@@ -149,7 +218,18 @@ static NSCache *imageCache = nil;
 			// only local files we can directly load without punishment
 			if ([contentURL isFileURL])
 			{
-				image = [[DTImage alloc] initWithContentsOfFile:[contentURL path]];
+#if TARGET_OS_IPHONE
+				NSString *ext = [[[contentURL lastPathComponent] pathExtension] lowercaseString];
+				
+				if ([ext isEqualToString:@"gif"])
+				{
+					image = DTAnimatedGIFFromFile([contentURL path]);
+				}
+				else
+#endif
+				{
+					image = [[DTImage alloc] initWithContentsOfFile:[contentURL path]];
+				}
 			}
 			
 			// cache that for later
@@ -182,12 +262,12 @@ static NSCache *imageCache = nil;
 	{
 		// get the other dimension if one is missing
 		
-		if (!_originalSize.width && _originalSize.height)
+		if (_originalSize.width==0 && _originalSize.height!=0)
 		{
 			CGFloat factor = _originalSize.height/image.size.height;
 			_originalSize.width = image.size.height * factor;
 		}
-		else if (_originalSize.width && !_originalSize.height)
+		else if (_originalSize.width!=0 && _originalSize.height==0)
 		{
 			CGFloat factor = _originalSize.width/image.size.width;
 			_originalSize.height = image.size.width * factor;
@@ -203,7 +283,7 @@ static NSCache *imageCache = nil;
 	{
 		// get the other dimension if one is missing
 		
-		if (!_displaySize.width && _displaySize.height)
+		if (_displaySize.width==0 && _displaySize.height!=0)
 		{
 			CGSize newDisplaySize = _displaySize;
 
@@ -212,7 +292,7 @@ static NSCache *imageCache = nil;
 			
 			[self setDisplaySize:newDisplaySize withMaxDisplaySize:_maxImageSize];
 		}
-		else if (_displaySize.width && !_displaySize.height)
+		else if (_displaySize.width!=0 && _displaySize.height==0)
 		{
 			CGSize newDisplaySize = _displaySize;
 			
@@ -257,7 +337,7 @@ static NSCache *imageCache = nil;
 - (void)drawInRect:(CGRect)rect context:(CGContextRef)context
 {
 #if TARGET_OS_IPHONE
-	CGContextDrawImage(context, rect, self.image.CGImage);
+	[self.image drawInRect:rect];
 #endif
 }
 

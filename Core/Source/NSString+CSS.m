@@ -6,8 +6,11 @@
 //  Copyright (c) 2012 Drobnik.com. All rights reserved.
 //
 
-#import "DTCoreText.h"
+#import "DTCompatibility.h"
 #import "NSString+CSS.h"
+#import "NSScanner+HTML.h"
+#import "NSCharacterSet+HTML.h"
+#import "DTCoreTextConstants.h"
 
 @implementation NSString (CSS)
 
@@ -46,18 +49,18 @@
 	{
 		return NO;
 	}
-
+	
 	NSString *numberUnitStr;
 	if (![scanner scanCharactersFromSet:[NSCharacterSet cssLengthUnitCharacterSet] intoString:&numberUnitStr])
 	{
-		return NO;
+		return YES;
 	}
 	
 	if ([numberUnitStr isEqualToString:@"em"] | [numberUnitStr isEqualToString:@"px"] | [numberUnitStr isEqualToString:@"pt"])
 	{
 		return YES;
 	}
-
+	
 	return NO;
 }
 
@@ -170,42 +173,42 @@
 
 - (DTEdgeInsets)DTEdgeInsetsRelativeToCurrentTextSize:(CGFloat)textSize textScale:(CGFloat)textScale
 {
-		DTEdgeInsets edgeInsets = {0,0,0,0};
+	DTEdgeInsets edgeInsets = {0,0,0,0};
+	
+	if ([self length])
+	{
+		// maybe it's using the short style
+		NSArray *parts = [self componentsSeparatedByString:@" "];
 		
-		if ([self length])
+		if ([parts count] == 4)
 		{
-			// maybe it's using the short style
-			NSArray *parts = [self componentsSeparatedByString:@" "];
-			
-			if ([parts count] == 4)
-			{
-				edgeInsets.top = [[parts objectAtIndex:0] pixelSizeOfCSSMeasureRelativeToCurrentTextSize:textSize textScale:textScale];
-				edgeInsets.right = [[parts objectAtIndex:1] pixelSizeOfCSSMeasureRelativeToCurrentTextSize:textSize textScale:textScale];
-				edgeInsets.bottom = [[parts objectAtIndex:2] pixelSizeOfCSSMeasureRelativeToCurrentTextSize:textSize textScale:textScale];
-				edgeInsets.left = [[parts objectAtIndex:3] pixelSizeOfCSSMeasureRelativeToCurrentTextSize:textSize textScale:textScale];
-			}
-			else if ([parts count] == 3)
-			{
-				edgeInsets.top = [[parts objectAtIndex:0] pixelSizeOfCSSMeasureRelativeToCurrentTextSize:textSize textScale:textScale];
-				edgeInsets.right = [[parts objectAtIndex:1] pixelSizeOfCSSMeasureRelativeToCurrentTextSize:textSize textScale:textScale];
-				edgeInsets.bottom = [[parts objectAtIndex:2] pixelSizeOfCSSMeasureRelativeToCurrentTextSize:textSize textScale:textScale];
-				edgeInsets.left = edgeInsets.right;
-			}
-			else if ([parts count] == 2)
-			{
-				edgeInsets.top = [[parts objectAtIndex:0] pixelSizeOfCSSMeasureRelativeToCurrentTextSize:textSize textScale:textScale];
-				edgeInsets.right = [[parts objectAtIndex:1] pixelSizeOfCSSMeasureRelativeToCurrentTextSize:textSize textScale:textScale];
-				edgeInsets.bottom = edgeInsets.top;
-				edgeInsets.left = edgeInsets.right;
-			}
-			else
-			{
-				CGFloat paddingAmount = [self pixelSizeOfCSSMeasureRelativeToCurrentTextSize:textSize textScale:textScale];
-				edgeInsets = DTEdgeInsetsMake(paddingAmount, paddingAmount, paddingAmount, paddingAmount);
-			}
+			edgeInsets.top = [[parts objectAtIndex:0] pixelSizeOfCSSMeasureRelativeToCurrentTextSize:textSize textScale:textScale];
+			edgeInsets.right = [[parts objectAtIndex:1] pixelSizeOfCSSMeasureRelativeToCurrentTextSize:textSize textScale:textScale];
+			edgeInsets.bottom = [[parts objectAtIndex:2] pixelSizeOfCSSMeasureRelativeToCurrentTextSize:textSize textScale:textScale];
+			edgeInsets.left = [[parts objectAtIndex:3] pixelSizeOfCSSMeasureRelativeToCurrentTextSize:textSize textScale:textScale];
 		}
-		
-		return edgeInsets;
+		else if ([parts count] == 3)
+		{
+			edgeInsets.top = [[parts objectAtIndex:0] pixelSizeOfCSSMeasureRelativeToCurrentTextSize:textSize textScale:textScale];
+			edgeInsets.right = [[parts objectAtIndex:1] pixelSizeOfCSSMeasureRelativeToCurrentTextSize:textSize textScale:textScale];
+			edgeInsets.bottom = [[parts objectAtIndex:2] pixelSizeOfCSSMeasureRelativeToCurrentTextSize:textSize textScale:textScale];
+			edgeInsets.left = edgeInsets.right;
+		}
+		else if ([parts count] == 2)
+		{
+			edgeInsets.top = [[parts objectAtIndex:0] pixelSizeOfCSSMeasureRelativeToCurrentTextSize:textSize textScale:textScale];
+			edgeInsets.right = [[parts objectAtIndex:1] pixelSizeOfCSSMeasureRelativeToCurrentTextSize:textSize textScale:textScale];
+			edgeInsets.bottom = edgeInsets.top;
+			edgeInsets.left = edgeInsets.right;
+		}
+		else
+		{
+			CGFloat paddingAmount = [self pixelSizeOfCSSMeasureRelativeToCurrentTextSize:textSize textScale:textScale];
+			edgeInsets = DTEdgeInsetsMake(paddingAmount, paddingAmount, paddingAmount, paddingAmount);
+		}
+	}
+	
+	return edgeInsets;
 }
 
 #pragma mark - CSS Shadows
@@ -260,7 +263,7 @@
 #endif
 					
 					NSDictionary *shadowDict = [NSDictionary dictionaryWithObjectsAndKeys:offsetValue, @"Offset",
-														 [NSNumber numberWithFloat:blur], @"Blur",
+														 DTNSNumberFromCGFloat(blur), @"Blur",
 														 shadowColor, @"Color", nil];
 					
 					[tmpArray addObject:shadowDict];
@@ -306,7 +309,7 @@
 #endif
 					
 					NSDictionary *shadowDict = [NSDictionary dictionaryWithObjectsAndKeys:offsetValue, @"Offset",
-														 [NSNumber numberWithFloat:blur], @"Blur",
+														 DTNSNumberFromCGFloat(blur), @"Blur",
 														 shadowColor, @"Color", nil];
 					
 					[tmpArray addObject:shadowDict];

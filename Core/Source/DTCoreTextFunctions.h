@@ -6,7 +6,12 @@
 //  Copyright (c) 2012 Drobnik.com. All rights reserved.
 //
 
+#import "DTCompatibility.h"
+
 #if TARGET_OS_IPHONE
+
+#import <UIKit/UIKit.h>
+
 /**
  Creates a CTFont from a UIFont
  @param font The `UIFont`
@@ -40,3 +45,18 @@ CGFloat DTCeilWithContentScale(CGFloat value, CGFloat contentScale);
  With contentScale 1 the results are identical to roundf, with Retina content scale 2 the results are multiples of 0.5.
  */
 CGFloat DTFloorWithContentScale(CGFloat value, CGFloat contentScale);
+
+#pragma mark - Alignment Conversion
+
+#if DTCORETEXT_SUPPORT_NS_ATTRIBUTES
+/**
+ Converts from NSTextAlignment to CTTextAligment
+ */
+CTTextAlignment DTNSTextAlignmentToCTTextAlignment(NSTextAlignment nsTextAlignment);
+
+/**
+ Converts from CTTextAlignment to NSTextAligment
+ */
+NSTextAlignment DTNSTextAlignmentFromCTTextAlignment(CTTextAlignment ctTextAlignment);
+#endif
+

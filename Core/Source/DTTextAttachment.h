@@ -7,21 +7,39 @@
 //
 
 #if TARGET_OS_IPHONE
-#import <CoreText/CoreText.h>
 #elif TARGET_OS_MAC
 #import <ApplicationServices/ApplicationServices.h>
 #endif
 
+#import <CoreText/CoreText.h>
+
 @class DTHTMLElement;
 
-typedef enum
+/**
+ Text Attachment vertical alignment
+ */
+typedef NS_ENUM(NSUInteger, DTTextAttachmentVerticalAlignment)
 {
+	/**
+	 Baseline alignment (default)
+	 */
 	DTTextAttachmentVerticalAlignmentBaseline = 0,
+	
+	/**
+	 Align with top edge
+	 */
 	DTTextAttachmentVerticalAlignmentTop,
+	
+	/**
+	 Align with center
+	 */
 	DTTextAttachmentVerticalAlignmentCenter,
+	
+	/**
+	 Align with bottom edge
+	 */
 	DTTextAttachmentVerticalAlignmentBottom
-} DTTextAttachmentVerticalAlignment;
-
+};
 
 /**
  Methods to implement for attachments to support inline drawing.
@@ -55,7 +73,7 @@ typedef enum
 /**
  An object to represent an attachment in an HTML/rich text view.  
  */
-@interface DTTextAttachment : NSObject
+@interface DTTextAttachment : NSObject <NSCoding>
 {
 	CGSize _displaySize;  // the display dimensions of the attachment
 	CGSize _originalSize; // the original dimensions of the attachment
@@ -150,7 +168,9 @@ typedef enum
 @property (nonatomic, strong) NSString *hyperLinkGUID;
 
 /**
- The attributes dictionary of the attachment
+ The attributes dictionary of the attachment.
+ 
+ If initialized from HTML, the values of this dictionary are transferred from the give HTML element.  If you wish to add custom attribute values to be written to and read from HTML, be aware that the attribute name will be lowercased in compliance with W3C recommendations.  Therefore, you may set a camel-case name and persist to HTML, but you will receive a lowercase name when the HTML is transformed into an attributed string.
  */
 @property (nonatomic, strong) NSDictionary *attributes;
 
@@ -162,10 +182,10 @@ typedef enum
  Registers your own class for use when encountering a specific tag Name. If you register a class for a previously registered class (or one of the predefined ones (img, iframe, object, video) then this replaces this with the newer registration.
  
  These registrations are permanent during the run time of your app. Custom attachment classes must implement the initWithElement:options: initializer and can implement the DTTextAttachmentDrawing and/or DTTextAttachmentHTMLPersistence protocols.
- @param class The class to instantiate in textAttachmentWithElement:options: when encountering a tag with this name
+ @param theClass The class to instantiate in textAttachmentWithElement:options: when encountering a tag with this name
  @param tagName The tag name to use this class for
  */
-+ (void)registerClass:(Class)class forTagName:(NSString *)tagName;
++ (void)registerClass:(Class)theClass forTagName:(NSString *)tagName;
 
 /**
  The class to use for a tag name

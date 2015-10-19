@@ -7,7 +7,14 @@
 //
 
 #import "NSAttributedString+SmallCaps.h"
-#import "DTCoreText.h"
+#import "DTCoreTextFontDescriptor.h"
+#import "NSDictionary+DTCoreText.h"
+#import "DTCoreTextConstants.h"
+
+
+#if TARGET_OS_IPHONE
+#import "UIFont+DTCoreText.h"
+#endif
 
 @implementation NSAttributedString (SmallCaps)
 
@@ -21,7 +28,7 @@
 	}
 	
 	DTCoreTextFontDescriptor *smallerFontDesc = [fontDescriptor copy];
-	smallerFontDesc.pointSize *= 0.7;
+	smallerFontDesc.pointSize *= (CGFloat)0.7;
 	
 	CTFontRef smallerFont = [smallerFontDesc newMatchingFont];
 	
